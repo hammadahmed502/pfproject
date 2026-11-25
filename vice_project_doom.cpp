@@ -267,6 +267,8 @@ int main() {
     whip_sound.stop();
     hit_sound.stop();
     level_music.stop();
+
+    cout << "";
     return 0;
 }
 
@@ -861,4 +863,5 @@ void display_flying_insects(RenderWindow& window, Sprite& insect_sprite, Texture
         insect_sprite.setPosition(draw_x, insect_y[i]);
         window.draw(insect_sprite);
     }
+
 }
