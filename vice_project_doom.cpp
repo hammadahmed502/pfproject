@@ -19,7 +19,12 @@ void player_gravity(float&, float&, bool&, Sound&, const float, const float, con
 void update_player_whip(bool&, bool&, int&, int&, const int, Sound&);
 void update_player_sprite(Sprite&, Texture&, Texture&, Texture&, Texture&, bool, bool, bool, bool, int, int&, int&, const int, int&, int&, int&);
 void update_whip_hitbox(bool, bool, bool, bool, int, float, float, int, int, bool&, float&, float&, float&, float&);
-void check_whip_hits(bool, float, float, float, float, float[], float[], bool[], const int, int, int, float[], float[], bool[], const int, int, int, float[], float[], bool[], const int, int, int, Sound&);
+void check_whip_hits(bool, float, float, float, float,
+                     float[], float[], bool[], const int, int, int,
+                     float[], float[], bool[], const int, int, int,
+                     float[], float[], bool[], const int, int, int,
+                     float[], float[], float[], int[], int[], int[], bool[], int&, const int,
+                     float[], float[], float[], int[], bool[], int&, const int, Sound&);
 void init_crawlers(bool[], const int);
 void spawn_next_crawler(int&, int&, float[], float[], float[], float[], bool[], bool[], bool[], const int, const int, const int);
 void update_crawlers(float[], float[], float[], float[], bool[], bool[], bool[], const int, const int, const int, const float, const float, const int);
@@ -32,6 +37,14 @@ void init_flying_insects(bool[], const int);
 void spawn_next_flying_insect(int&, int&, float[], float[], float[], float[], float[], bool[], bool[], const int, const int, const int, const int);
 void update_flying_insects(float[], float[], float[], float[], float[], bool[], bool[], const int, const int, const int, const int);
 void display_flying_insects(RenderWindow&, Sprite&, Texture&, float[], float[], bool[], bool[], const int, const int, const float);
+void init_coins(bool[], int[], int[], int[], const int);
+void spawn_coin(float[], float[], float[], int[], int[], int[], bool[], int&, const int, float, float);
+void update_coins(float[], float[], float[], int[], int[], int[], bool[], const int, const float, const int, const float, float, float, int, int, int&, Sound&);
+void display_coins(RenderWindow&, Sprite&, Texture&, float[], float[], int[], bool[], const int, const int, const int, const float);
+void init_refills(bool[], int[], const int);
+void spawn_refill(float[], float[], float[], int[], bool[], int&, const int, float, float);
+void update_refills(float[], float[], float[], int[], bool[], const int, const float, const int, const float, const float, float, float, int, int, Sound&);
+void display_refills(RenderWindow&, Sprite&, Texture&, float[], float[], bool[], const int, const int, const int, const float, const float);
 
 int main() {
     srand((unsigned int)time(0));
@@ -61,11 +74,17 @@ int main() {
     Sound whip_sound(whip_buffer);
     whip_sound.setVolume(50);
 
+    SoundBuffer coin_buffer;
+    coin_buffer.loadFromFile("Data/collect.wav");
+    Sound coin_sound(coin_buffer);
+    coin_sound.setVolume(60);
+
     // Player setup
     const int stand_height = 108;  // 36px frame * 3 scale
     const int kneel_height = 75;   // 25px of kneeling art * 3 scale
     const int player_width = 54;
     int player_height = stand_height;
+    int score = 0;
 
     float player_x = 120.0f;
     float player_y = (float)(ground_y - stand_height);
@@ -211,6 +230,64 @@ int main() {
 
     init_flying_insects(insect_alive, max_insects);
 
+    // Coin setup: Data/coin_flip_96x16.png is 96x16 (6 frames of 16x16)
+    Texture coin_texture;
+    coin_texture.loadFromFile("Data/coin_flip_96x16.png");
+
+    const int coin_total_frames = 6;
+    int raw_coin_sheet_w = (int)coin_texture.getSize().x;
+    int raw_coin_sheet_h = (int)coin_texture.getSize().y;
+    if (raw_coin_sheet_w <= 0) raw_coin_sheet_w = 96;
+    if (raw_coin_sheet_h <= 0) raw_coin_sheet_h = 16;
+
+    const int coin_frame_w = raw_coin_sheet_w / coin_total_frames;
+    const int coin_frame_h = raw_coin_sheet_h;
+    const float coin_scale = 40.0f / (float)coin_frame_h;
+    const float coin_radius = (coin_frame_h * coin_scale) * 0.5f;
+
+    Sprite coin_sprite;
+    coin_sprite.setTexture(coin_texture, true);
+
+    const int max_coins = 32;
+    float coin_x[max_coins];
+    float coin_y[max_coins];
+    float coin_vy[max_coins];
+    int coin_frame[max_coins];
+    int coin_anim_timer[max_coins];
+    int coin_pickup_delay[max_coins];
+    bool coin_active[max_coins];
+    int coin_next_slot = 0;
+
+    init_coins(coin_active, coin_frame, coin_anim_timer, coin_pickup_delay, max_coins);
+
+    // Refill setup: Data/refill_2.png or Data/refill.png dropped when killing Spiked Crawlers
+    Texture refill_texture;
+    if (!refill_texture.loadFromFile("Data/refill_2.png")) {
+        refill_texture.loadFromFile("Data/refill.png");
+    }
+
+    int raw_refill_w = (int)refill_texture.getSize().x;
+    int raw_refill_h = (int)refill_texture.getSize().y;
+    if (raw_refill_w <= 0) raw_refill_w = 24;
+    if (raw_refill_h <= 0) raw_refill_h = 16;
+
+    const float refill_scale = 40.0f / (float)raw_refill_h;
+    const float refill_half_w = (raw_refill_w * refill_scale) * 0.5f;
+    const float refill_half_h = (raw_refill_h * refill_scale) * 0.5f;
+
+    Sprite refill_sprite;
+    refill_sprite.setTexture(refill_texture, true);
+
+    const int max_refills = 16;
+    float refill_x[max_refills];
+    float refill_y[max_refills];
+    float refill_vy[max_refills];
+    int refill_pickup_delay[max_refills];
+    bool refill_active[max_refills];
+    int refill_next_slot = 0;
+
+    init_refills(refill_active, refill_pickup_delay, max_refills);
+
     Event event;
     while (window.isOpen()) {
         while (window.pollEvent(event)) {
@@ -229,7 +306,12 @@ int main() {
         update_player_whip(is_whipping, was_q_pressed, whip_frame, whip_timer, whip_delay, whip_sound);
 
         update_whip_hitbox(is_whipping, is_kneeling, on_ground, facing_right, whip_frame, player_x, player_y, player_width, player_height, whip_hitbox_active, whip_box_x, whip_box_y, whip_box_w, whip_box_h);
-        check_whip_hits(whip_hitbox_active, whip_box_x, whip_box_y, whip_box_w, whip_box_h, crawler_x, crawler_y, crawler_alive, max_crawlers, crawler_width, crawler_height, blue_x, blue_y, blue_alive, max_blue_enemies, blue_width, blue_height, insect_x, insect_y, insect_alive, max_insects, insect_width, insect_height, hit_sound);
+        check_whip_hits(whip_hitbox_active, whip_box_x, whip_box_y, whip_box_w, whip_box_h,
+                        crawler_x, crawler_y, crawler_alive, max_crawlers, crawler_width, crawler_height,
+                        blue_x, blue_y, blue_alive, max_blue_enemies, blue_width, blue_height,
+                        insect_x, insect_y, insect_alive, max_insects, insect_width, insect_height,
+                        coin_x, coin_y, coin_vy, coin_frame, coin_anim_timer, coin_pickup_delay, coin_active, coin_next_slot, max_coins,
+                        refill_x, refill_y, refill_vy, refill_pickup_delay, refill_active, refill_next_slot, max_refills, hit_sound);
 
         spawn_next_crawler(crawler_spawned_count, crawler_spawn_timer, crawler_x, crawler_y, crawler_vx, crawler_vy, crawler_alive, crawler_facing_right, crawler_on_ground, max_crawlers, crawler_width, crawler_height);
         update_crawlers(crawler_x, crawler_y, crawler_vx, crawler_vy, crawler_alive, crawler_facing_right, crawler_on_ground, max_crawlers, crawler_width, crawler_height, gravity, terminal_velocity, ground_y);
@@ -239,6 +321,9 @@ int main() {
 
         spawn_next_flying_insect(insect_spawned_count, insect_spawn_timer, insect_x, insect_y, insect_base_y, insect_vx, insect_wave_angle, insect_alive, insect_facing_right, max_insects, insect_width, insect_height, ground_y);
         update_flying_insects(insect_x, insect_y, insect_base_y, insect_vx, insect_wave_angle, insect_alive, insect_facing_right, max_insects, insect_width, insect_height, ground_y);
+
+        update_coins(coin_x, coin_y, coin_vy, coin_frame, coin_anim_timer, coin_pickup_delay, coin_active, max_coins, gravity * 0.55f, ground_y, coin_radius, player_x, player_y, player_width, player_height, score, coin_sound);
+        update_refills(refill_x, refill_y, refill_vy, refill_pickup_delay, refill_active, max_refills, gravity * 0.55f, ground_y, refill_half_w, refill_half_h, player_x, player_y, player_width, player_height, coin_sound);
 
         update_player_sprite(player_sprite, run_texture, stand_whip_texture, run_whip_texture, crouch_whip_texture, is_moving, on_ground, is_kneeling, is_whipping, whip_frame, run_step, anim_timer, anim_delay, frame_width, frame_height, foot_height);
 
@@ -260,15 +345,16 @@ int main() {
         display_crawlers(window, crawler_sprite, crawler_texture, crawler_x, crawler_y, crawler_alive, crawler_facing_right, max_crawlers, crawler_width, crawler_scale);
         display_blue_enemies(window, blue_sprite, blue_stand_texture, blue_jump_texture, blue_x, blue_y, blue_alive, blue_facing_right, blue_on_ground, max_blue_enemies, blue_width, blue_scale);
         display_flying_insects(window, insect_sprite, insect_texture, insect_x, insect_y, insect_alive, insect_facing_right, max_insects, insect_width, insect_scale);
+        display_coins(window, coin_sprite, coin_texture, coin_x, coin_y, coin_frame, coin_active, max_coins, coin_frame_w, coin_frame_h, coin_scale);
+        display_refills(window, refill_sprite, refill_texture, refill_x, refill_y, refill_active, max_refills, raw_refill_w, raw_refill_h, refill_scale, refill_scale);
         window.draw(player_sprite);
         window.display();
     }
 
+    coin_sound.stop();
     whip_sound.stop();
     hit_sound.stop();
     level_music.stop();
-
-    cout << "";
     return 0;
 }
 
@@ -513,11 +599,17 @@ void update_whip_hitbox(bool is_whipping, bool is_kneeling, bool on_ground, bool
     }
 }
 
-void check_whip_hits(bool whip_hitbox_active, float whip_box_x, float whip_box_y, float whip_box_w, float whip_box_h, float crawler_x[], float crawler_y[], bool crawler_alive[], const int max_crawlers, int crawler_width, int crawler_height, float blue_x[], float blue_y[], bool blue_alive[], const int max_blue_enemies, int blue_width, int blue_height, float insect_x[], float insect_y[], bool insect_alive[], const int max_insects, int insect_width, int insect_height, Sound& hit_sound) {
+void check_whip_hits(bool whip_hitbox_active, float whip_box_x, float whip_box_y, float whip_box_w, float whip_box_h,
+                     float crawler_x[], float crawler_y[], bool crawler_alive[], const int max_crawlers, int crawler_width, int crawler_height,
+                     float blue_x[], float blue_y[], bool blue_alive[], const int max_blue_enemies, int blue_width, int blue_height,
+                     float insect_x[], float insect_y[], bool insect_alive[], const int max_insects, int insect_width, int insect_height,
+                     float coin_x[], float coin_y[], float coin_vy[], int coin_frame[], int coin_anim_timer[], int coin_pickup_delay[], bool coin_active[], int& coin_next_slot, const int max_coins,
+                     float refill_x[], float refill_y[], float refill_vy[], int refill_pickup_delay[], bool refill_active[], int& refill_next_slot, const int max_refills, Sound& hit_sound) {
     if (!whip_hitbox_active) {
         return;
     }
 
+    // Spiked crawlers spawn refill pickups
     for (int i = 0; i < max_crawlers; i++) {
         if (!crawler_alive[i]) continue;
         if (whip_box_x < crawler_x[i] + crawler_width &&
@@ -525,10 +617,13 @@ void check_whip_hits(bool whip_hitbox_active, float whip_box_x, float whip_box_y
             whip_box_y < crawler_y[i] + crawler_height &&
             whip_box_y + whip_box_h > crawler_y[i]) {
             crawler_alive[i] = false;
+            spawn_refill(refill_x, refill_y, refill_vy, refill_pickup_delay, refill_active, refill_next_slot, max_refills,
+                         crawler_x[i] + crawler_width * 0.5f, crawler_y[i] + crawler_height * 0.5f);
             play_hit_sound(hit_sound);
         }
     }
 
+    // Blue jumping enemies spawn coins
     for (int i = 0; i < max_blue_enemies; i++) {
         if (!blue_alive[i]) continue;
         if (whip_box_x < blue_x[i] + blue_width &&
@@ -536,10 +631,13 @@ void check_whip_hits(bool whip_hitbox_active, float whip_box_x, float whip_box_y
             whip_box_y < blue_y[i] + blue_height &&
             whip_box_y + whip_box_h > blue_y[i]) {
             blue_alive[i] = false;
+            spawn_coin(coin_x, coin_y, coin_vy, coin_frame, coin_anim_timer, coin_pickup_delay, coin_active, coin_next_slot, max_coins,
+                       blue_x[i] + blue_width * 0.5f, blue_y[i] + blue_height * 0.5f);
             play_hit_sound(hit_sound);
         }
     }
 
+    // Flying insects spawn coins
     for (int i = 0; i < max_insects; i++) {
         if (!insect_alive[i]) continue;
         if (whip_box_x < insect_x[i] + insect_width &&
@@ -547,6 +645,8 @@ void check_whip_hits(bool whip_hitbox_active, float whip_box_x, float whip_box_y
             whip_box_y < insect_y[i] + insect_height &&
             whip_box_y + whip_box_h > insect_y[i]) {
             insect_alive[i] = false;
+            spawn_coin(coin_x, coin_y, coin_vy, coin_frame, coin_anim_timer, coin_pickup_delay, coin_active, coin_next_slot, max_coins,
+                       insect_x[i] + insect_width * 0.5f, insect_y[i] + insect_height * 0.5f);
             play_hit_sound(hit_sound);
         }
     }
@@ -717,8 +817,8 @@ void update_blue_enemies(float player_x, float blue_x[], float blue_y[], float b
             if (blue_jump_timer[i] > 0) {
                 blue_jump_timer[i]--;
             } else {
-                float jump_speed_x = 3.0f + (float)(rand() % 18) / 10.0f;
-                blue_vy[i] = -16.0f - (float)(rand() % 5);
+                float jump_speed_x = 2.2f + (float)(rand() % 13) / 10.0f;
+                blue_vy[i] = -9.5f - (float)(rand() % 4);
                 blue_vx[i] = blue_facing_right[i] ? jump_speed_x : -jump_speed_x;
                 blue_on_ground[i] = false;
             }
@@ -863,5 +963,179 @@ void display_flying_insects(RenderWindow& window, Sprite& insect_sprite, Texture
         insect_sprite.setPosition(draw_x, insect_y[i]);
         window.draw(insect_sprite);
     }
+}
 
+void init_coins(bool coin_active[], int coin_frame[], int coin_anim_timer[], int coin_pickup_delay[], const int max_coins) {
+    for (int i = 0; i < max_coins; i++) {
+        coin_active[i] = false;
+        coin_frame[i] = 0;
+        coin_anim_timer[i] = 0;
+        coin_pickup_delay[i] = 0;
+    }
+}
+
+void spawn_coin(float coin_x[], float coin_y[], float coin_vy[], int coin_frame[], int coin_anim_timer[], int coin_pickup_delay[], bool coin_active[], int& coin_next_slot, const int max_coins, float spawn_x, float spawn_y) {
+    int slot = -1;
+    for (int i = 0; i < max_coins; i++) {
+        if (!coin_active[i]) {
+            slot = i;
+            break;
+        }
+    }
+
+    if (slot == -1) {
+        slot = coin_next_slot;
+        coin_next_slot = (coin_next_slot + 1) % max_coins;
+    }
+
+    coin_active[slot] = true;
+    coin_x[slot] = spawn_x;
+    coin_y[slot] = spawn_y;
+    coin_vy[slot] = -12.0f;     // Pops up into the air before falling down onto the floor
+    coin_frame[slot] = 0;
+    coin_anim_timer[slot] = 0;
+    coin_pickup_delay[slot] = 20;  // Prevents instant pickup on the kill frame when enemy is close to Quinn
+}
+
+void update_coins(float coin_x[], float coin_y[], float coin_vy[], int coin_frame[], int coin_anim_timer[], int coin_pickup_delay[], bool coin_active[], const int max_coins, const float coin_gravity, const int ground_y, const float coin_radius, float player_x, float player_y, int player_width, int player_height, int& score, Sound& coin_sound) {
+    const int total_coin_frames = 6;
+    const int coin_anim_delay = 4;
+
+    for (int i = 0; i < max_coins; i++) {
+        if (!coin_active[i]) {
+            continue;
+        }
+
+        if (coin_pickup_delay[i] > 0) {
+            coin_pickup_delay[i]--;
+        }
+
+        // Continuously rotate coin around its axis
+        coin_anim_timer[i]++;
+        if (coin_anim_timer[i] >= coin_anim_delay) {
+            coin_anim_timer[i] = 0;
+            coin_frame[i] = (coin_frame[i] + 1) % total_coin_frames;
+        }
+
+        // Rise up first, then fall under gravity until landing on the floor
+        if (coin_y[i] + coin_radius < ground_y || coin_vy[i] < 0.0f) {
+            coin_y[i] += coin_vy[i];
+            coin_vy[i] += coin_gravity;
+            if (coin_y[i] + coin_radius >= ground_y && coin_vy[i] >= 0.0f) {
+                coin_y[i] = (float)ground_y - coin_radius;
+                coin_vy[i] = 0.0f;
+            }
+        }
+
+        // Collected when overlapping the player's hitbox (after brief spawn pop delay)
+        if (coin_pickup_delay[i] <= 0) {
+            float coin_left = coin_x[i] - coin_radius;
+            float coin_top = coin_y[i] - coin_radius;
+            float coin_size = coin_radius * 2.0f;
+
+            if (player_x < coin_left + coin_size &&
+                player_x + player_width > coin_left &&
+                player_y < coin_top + coin_size &&
+                player_y + player_height > coin_top) {
+                coin_active[i] = false;
+                score += 100;
+                coin_sound.play();
+            }
+        }
+    }
+}
+
+void display_coins(RenderWindow& window, Sprite& coin_sprite, Texture& coin_texture, float coin_x[], float coin_y[], int coin_frame[], bool coin_active[], const int max_coins, const int coin_frame_w, const int coin_frame_h, const float coin_scale) {
+    coin_sprite.setTexture(coin_texture, false);
+    coin_sprite.setOrigin(coin_frame_w * 0.5f, coin_frame_h * 0.5f);
+    coin_sprite.setScale(coin_scale, coin_scale);
+
+    for (int i = 0; i < max_coins; i++) {
+        if (!coin_active[i]) {
+            continue;
+        }
+
+        coin_sprite.setTextureRect(IntRect(coin_frame[i] * coin_frame_w, 0, coin_frame_w, coin_frame_h));
+        coin_sprite.setPosition(coin_x[i], coin_y[i]);
+        window.draw(coin_sprite);
+    }
+}
+
+void init_refills(bool refill_active[], int refill_pickup_delay[], const int max_refills) {
+    for (int i = 0; i < max_refills; i++) {
+        refill_active[i] = false;
+        refill_pickup_delay[i] = 0;
+    }
+}
+
+void spawn_refill(float refill_x[], float refill_y[], float refill_vy[], int refill_pickup_delay[], bool refill_active[], int& refill_next_slot, const int max_refills, float spawn_x, float spawn_y) {
+    int slot = -1;
+    for (int i = 0; i < max_refills; i++) {
+        if (!refill_active[i]) {
+            slot = i;
+            break;
+        }
+    }
+
+    if (slot == -1) {
+        slot = refill_next_slot;
+        refill_next_slot = (refill_next_slot + 1) % max_refills;
+    }
+
+    refill_active[slot] = true;
+    refill_x[slot] = spawn_x;
+    refill_y[slot] = spawn_y;
+    refill_vy[slot] = -12.0f;
+    refill_pickup_delay[slot] = 20;
+}
+
+void update_refills(float refill_x[], float refill_y[], float refill_vy[], int refill_pickup_delay[], bool refill_active[], const int max_refills, const float refill_gravity, const int ground_y, const float refill_half_w, const float refill_half_h, float player_x, float player_y, int player_width, int player_height, Sound& collect_sound) {
+    for (int i = 0; i < max_refills; i++) {
+        if (!refill_active[i]) {
+            continue;
+        }
+
+        if (refill_pickup_delay[i] > 0) {
+            refill_pickup_delay[i]--;
+        }
+
+        if (refill_y[i] + refill_half_h < ground_y || refill_vy[i] < 0.0f) {
+            refill_y[i] += refill_vy[i];
+            refill_vy[i] += refill_gravity;
+            if (refill_y[i] + refill_half_h >= ground_y && refill_vy[i] >= 0.0f) {
+                refill_y[i] = (float)ground_y - refill_half_h;
+                refill_vy[i] = 0.0f;
+            }
+        }
+
+        if (refill_pickup_delay[i] <= 0) {
+            float refill_left = refill_x[i] - refill_half_w;
+            float refill_top = refill_y[i] - refill_half_h;
+            float refill_w = refill_half_w * 2.0f;
+            float refill_h = refill_half_h * 2.0f;
+
+            if (player_x < refill_left + refill_w &&
+                player_x + player_width > refill_left &&
+                player_y < refill_top + refill_h &&
+                player_y + player_height > refill_top) {
+                refill_active[i] = false;
+                collect_sound.play();
+            }
+        }
+    }
+}
+
+void display_refills(RenderWindow& window, Sprite& refill_sprite, Texture& refill_texture, float refill_x[], float refill_y[], bool refill_active[], const int max_refills, const int refill_w, const int refill_h, const float refill_scale_x, const float refill_scale_y) {
+    refill_sprite.setTexture(refill_texture, true);
+    refill_sprite.setOrigin(refill_w * 0.5f, refill_h * 0.5f);
+    refill_sprite.setScale(refill_scale_x, refill_scale_y);
+
+    for (int i = 0; i < max_refills; i++) {
+        if (!refill_active[i]) {
+            continue;
+        }
+
+        refill_sprite.setPosition(refill_x[i], refill_y[i]);
+        window.draw(refill_sprite);
+    }
 }
