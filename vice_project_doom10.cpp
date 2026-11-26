@@ -8,15 +8,14 @@
 using namespace sf;
 using namespace std;
 
-const int screen_x = 1136;
-const int screen_y = 896;
-const float world_width = (float)(screen_x * 4); // 4 seamless screens (4544px)
+int screen_x = 1136;
+int screen_y = 896;
 
 void display_background(RenderWindow&, Sprite&);
 void play_hit_sound(Sound&);
 void player_kneel(float&, int&, const int, const int, bool&, bool);
-void player_movement(float&, float&, bool&, bool, bool&, bool&, bool&, Sound&, const float, const float, const int);
-void player_gravity(float&, float&, bool&, Sound&, const float, const float, const int, const int);
+void player_movement(float&, float&, float, const int, float&, bool&, bool, bool&, bool&, bool&, Sound&, const float, const float, const int, int&, const int, bool&);
+void player_gravity(float&, float&, bool&, Sound&, const float, const float, const int, const int, float, int, float[], float[], float[], float[], int, bool&);
 void update_player_whip(bool&, bool&, int&, int&, const int, Sound&);
 void update_player_sprite(Sprite&, Texture&, Texture&, Texture&, Texture&, bool, bool, bool, bool, int, int&, int&, const int, int&, int&, int&);
 void update_whip_hitbox(bool, bool, bool, bool, int, float, float, int, int, bool&, float&, float&, float&, float&);
@@ -45,22 +44,34 @@ void display_coins(RenderWindow&, Sprite&, Texture&, float[], float[], int[], bo
 void init_refills(bool[], int[], const int);
 void spawn_refill(float[], float[], float[], int[], bool[], int&, const int, float, float);
 void update_refills(float[], float[], float[], int[], bool[], const int, const float, const int, const float, const float, float, float, int, int, Sound&);
-void display_refills(RenderWindow&, Sprite&, Texture&, float[], float[], bool[], const int, const int, const int, const float, const float);
+void display_refills(RenderWindow&, Sprite&, Texture&, float[], float[], bool[], const int, const int, const int, const float, const float, const int);
+void draw_platforms_and_ladders(RenderWindow&, Sprite&, Texture&, Sprite&, Texture&, int);
 
 int main() {
     srand((unsigned int)time(0));
 
-    RenderWindow window(VideoMode(screen_x, screen_y), "VICE: Project Doom", Style::Resize);
+    RenderWindow window(VideoMode(screen_x, screen_y), "VICE: Project Doom - Custom Box & Ladder Textures", Style::Resize);
     window.setFramerateLimit(60);
 
-    // Camera view for seamless 4-screen scrolling
-    View camera(FloatRect(0.0f, 0.0f, (float)screen_x, (float)screen_y));
-
-    const int ground_y = 832;
+    const int ground_y = 815;
 
     Texture bg_texture;
     bg_texture.loadFromFile("Data/bg.png");
     Sprite bg_sprite(bg_texture);
+    Vector2u bg_size = bg_texture.getSize();
+    if (bg_size.x > 0 && bg_size.y > 0) {
+        bg_sprite.setScale((float)screen_x / bg_size.x, (float)screen_y / bg_size.y);
+    }
+
+    Texture block_texture;
+    block_texture.loadFromFile("Data/block1.png");
+    Sprite block_sprite(block_texture);
+
+    Texture ladder_texture;
+    if (!ladder_texture.loadFromFile("Data/ladder.png")) {
+        ladder_texture.loadFromFile("Data/block1.png");
+    }
+    Sprite ladder_sprite(ladder_texture);
 
     Music level_music;
     level_music.openFromFile("Data/mus.ogg");
@@ -83,12 +94,14 @@ int main() {
     Sound coin_sound(coin_buffer);
     coin_sound.setVolume(60);
 
-    // Player setup
-    const int stand_height = 108;  // 36px frame * 3 scale
-    const int kneel_height = 75;   // 25px of kneeling art * 3 scale
+    const int stand_height = 108;
+    const int kneel_height = 75;
     const int player_width = 54;
     int player_height = stand_height;
     int score = 0;
+    int current_screen = 1;
+    const int max_screens = 4;
+    bool is_on_ladder = false;
 
     float player_x = 120.0f;
     float player_y = (float)(ground_y - stand_height);
@@ -96,7 +109,7 @@ int main() {
 
     const float gravity = 1.0f;
     const float walk_speed = 6.0f;
-    const float jump_velocity = -18.0f;
+    const float jump_velocity = -17.5f;
     const float terminal_velocity = 20.0f;
 
     bool on_ground = true;
@@ -117,11 +130,6 @@ int main() {
     float whip_box_w = 0.0f;
     float whip_box_h = 0.0f;
 
-    // run.png is 221x49:
-    // sprite 0 (x=1, w=18): stand / jump
-    // sprites 1-4 (x=36,75,100,136; w=25,15,26,15): run cycle
-    // sprite 6 (x=195, w=20): kneel
-    // stand_whip.png, run_whip.png, crouch_whip.png are 245x48 (5 frames of 49x48)
     Texture run_texture;
     Texture stand_whip_texture;
     Texture run_whip_texture;
@@ -142,7 +150,6 @@ int main() {
     player_sprite.setTextureRect(IntRect(1, 0, frame_width, frame_height));
     player_sprite.setScale(3.0f, 3.0f);
 
-    // Spiked Crawler setup (4 total)
     Texture crawler_texture;
     crawler_texture.loadFromFile("Data/spiked_crawler.png");
 
@@ -172,7 +179,6 @@ int main() {
 
     init_crawlers(crawler_alive, max_crawlers);
 
-    // Blue Jumping Enemy setup (5 total)
     Texture blue_stand_texture;
     Texture blue_jump_texture;
     blue_stand_texture.loadFromFile("Data/blue_jumping_enemy_1.png");
@@ -204,7 +210,6 @@ int main() {
 
     init_blue_enemies(blue_alive, max_blue_enemies);
 
-    // Flying Insect setup (6 total, sine-wave flight)
     Texture insect_texture;
     insect_texture.loadFromFile("Data/flying_insect.png");
 
@@ -234,7 +239,6 @@ int main() {
 
     init_flying_insects(insect_alive, max_insects);
 
-    // Coin setup: Data/coin_flip_96x16.png is 96x16 (6 frames of 16x16)
     Texture coin_texture;
     coin_texture.loadFromFile("Data/coin_flip_96x16.png");
 
@@ -264,7 +268,6 @@ int main() {
 
     init_coins(coin_active, coin_frame, coin_anim_timer, coin_pickup_delay, max_coins);
 
-    // Refill setup: Data/refill_2.png or Data/refill.png dropped when killing Spiked Crawlers
     Texture refill_texture;
     if (!refill_texture.loadFromFile("Data/refill_2.png")) {
         refill_texture.loadFromFile("Data/refill.png");
@@ -292,8 +295,19 @@ int main() {
 
     init_refills(refill_active, refill_pickup_delay, max_refills);
 
+    Font font;
+    bool font_loaded = font.loadFromFile("Data/font.ttf") || font.loadFromFile("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf");
+    Text hud_text;
+    if (font_loaded) {
+        hud_text.setFont(font);
+        hud_text.setCharacterSize(22);
+        hud_text.setFillColor(Color::White);
+        hud_text.setPosition(20.0f, 20.0f);
+    }
+
     Event event;
     while (window.isOpen()) {
+        int prev_screen = current_screen;
         while (window.pollEvent(event)) {
             if (event.type == Event::Closed) {
                 window.close();
@@ -305,11 +319,45 @@ int main() {
         }
 
         player_kneel(player_y, player_height, stand_height, kneel_height, is_kneeling, on_ground);
-        player_movement(player_x, velocity_y, on_ground, is_kneeling, facing_right, is_moving, was_against_wall, hit_sound, walk_speed, jump_velocity, player_width);
-        player_gravity(player_y, velocity_y, on_ground, hit_sound, gravity, terminal_velocity, ground_y, player_height);
+        player_movement(player_x, player_y, ground_y, player_height, velocity_y, on_ground, is_kneeling, facing_right, is_moving, was_against_wall, hit_sound, walk_speed, jump_velocity, player_width, current_screen, max_screens, is_on_ladder);
+        
+        if (current_screen != prev_screen) {
+            crawler_spawned_count = 0;
+            crawler_spawn_timer = 15;
+            init_crawlers(crawler_alive, max_crawlers);
+
+            blue_spawned_count = 0;
+            blue_spawn_timer = 20;
+            init_blue_enemies(blue_alive, max_blue_enemies);
+
+            insect_spawned_count = 0;
+            insect_spawn_timer = 30;
+            init_flying_insects(insect_alive, max_insects);
+        }
+
+        float p_x[2], p_y[2], p_w[2], p_h[2];
+        int p_count = 0;
+        if (current_screen == 1) {
+            p_count = 1;
+            p_x[0] = 300.0f; p_y[0] = 620.0f; p_w[0] = 520.0f; p_h[0] = 24.0f;
+        } else if (current_screen == 2) {
+            p_count = 2;
+            p_x[0] = 150.0f; p_y[0] = 640.0f; p_w[0] = 380.0f; p_h[0] = 24.0f;
+            p_x[1] = 650.0f; p_y[1] = 550.0f; p_w[1] = 360.0f; p_h[1] = 24.0f;
+        } else if (current_screen == 3) {
+            p_count = 1;
+            p_x[0] = 200.0f; p_y[0] = 600.0f; p_w[0] = 720.0f; p_h[0] = 24.0f;
+        } else if (current_screen == 4) {
+            p_count = 2;
+            p_x[0] = 100.0f; p_y[0] = 640.0f; p_w[0] = 350.0f; p_h[0] = 24.0f;
+            p_x[1] = 600.0f; p_y[1] = 530.0f; p_w[1] = 420.0f; p_h[1] = 24.0f;
+        }
+
+        player_gravity(player_y, velocity_y, on_ground, hit_sound, gravity, terminal_velocity, ground_y, player_height, player_x, player_width, p_x, p_y, p_w, p_h, p_count, is_on_ladder);
         update_player_whip(is_whipping, was_q_pressed, whip_frame, whip_timer, whip_delay, whip_sound);
 
         update_whip_hitbox(is_whipping, is_kneeling, on_ground, facing_right, whip_frame, player_x, player_y, player_width, player_height, whip_hitbox_active, whip_box_x, whip_box_y, whip_box_w, whip_box_h);
+        
         check_whip_hits(whip_hitbox_active, whip_box_x, whip_box_y, whip_box_w, whip_box_h,
                         crawler_x, crawler_y, crawler_alive, max_crawlers, crawler_width, crawler_height,
                         blue_x, blue_y, blue_alive, max_blue_enemies, blue_width, blue_height,
@@ -339,30 +387,24 @@ int main() {
             ? player_x + (player_width - visual_width) / 2.0f
             : player_x + (player_width + visual_width) / 2.0f;
 
-        // Align the foot baseline of the sprite frame with the bottom of the hitbox,
-        // so standing, running, kneeling, and whipping poses all rest flush on the ground.
         float draw_y = player_y + player_height - foot_height * 3.0f;
         player_sprite.setPosition(draw_x, draw_y);
 
-        // Update camera to follow player seamlessly across the 4 screens
-        float camera_x = player_x + player_width / 2.0f;
-        if (camera_x < screen_x / 2.0f) {
-            camera_x = screen_x / 2.0f;
-        }
-        if (camera_x > world_width - screen_x / 2.0f) {
-            camera_x = world_width - screen_x / 2.0f;
-        }
-        camera.setCenter(camera_x, screen_y / 2.0f);
-        window.setView(camera);
-
         window.clear();
         display_background(window, bg_sprite);
+        draw_platforms_and_ladders(window, block_sprite, block_texture, ladder_sprite, ladder_texture, current_screen);
         display_crawlers(window, crawler_sprite, crawler_texture, crawler_x, crawler_y, crawler_alive, crawler_facing_right, max_crawlers, crawler_width, crawler_scale);
         display_blue_enemies(window, blue_sprite, blue_stand_texture, blue_jump_texture, blue_x, blue_y, blue_alive, blue_facing_right, blue_on_ground, max_blue_enemies, blue_width, blue_scale);
         display_flying_insects(window, insect_sprite, insect_texture, insect_x, insect_y, insect_alive, insect_facing_right, max_insects, insect_width, insect_scale);
         display_coins(window, coin_sprite, coin_texture, coin_x, coin_y, coin_frame, coin_active, max_coins, coin_frame_w, coin_frame_h, coin_scale);
-        display_refills(window, refill_sprite, refill_texture, refill_x, refill_y, refill_active, max_refills, raw_refill_w, raw_refill_h, refill_scale, refill_scale);
+        display_refills(window, refill_sprite, refill_texture, refill_x, refill_y, refill_active, max_refills, raw_refill_w, raw_refill_h, refill_scale, refill_scale, raw_refill_w);
         window.draw(player_sprite);
+
+        if (font_loaded) {
+            hud_text.setString("Score: " + to_string(score) + "   Screen: " + to_string(current_screen) + " / " + to_string(max_screens));
+            window.draw(hud_text);
+        }
+
         window.display();
     }
 
@@ -374,10 +416,48 @@ int main() {
 }
 
 void display_background(RenderWindow& window, Sprite& bg_sprite) {
-    // Tile the background seamlessly across all 4 screens
-    for (int i = 0; i < 4; i++) {
-        bg_sprite.setPosition((float)(i * screen_x), 0.0f);
-        window.draw(bg_sprite);
+    window.draw(bg_sprite);
+}
+
+void draw_platforms_and_ladders(RenderWindow& window, Sprite& block_sprite, Texture& block_texture, Sprite& ladder_sprite, Texture& ladder_texture, int current_screen) {
+    Vector2u b_size = block_texture.getSize();
+    float b_w = (b_size.x > 0) ? b_size.x : 24.0f;
+    float b_h = (b_size.y > 0) ? b_size.y : 24.0f;
+
+    auto draw_platform_line = [&](float start_x, float y, float total_w, float h) {
+        int count = (int)(total_w / b_w) + 1;
+        for (int i = 0; i < count; i++) {
+            float cx = start_x + i * b_w;
+            if (cx < start_x + total_w) {
+                block_sprite.setPosition(cx, y);
+                block_sprite.setScale(b_w > 0 ? b_w / b_w : 1.f, h / b_h);
+                window.draw(block_sprite);
+            }
+        }
+    };
+
+    if (current_screen == 1) {
+        draw_platform_line(300.f, 620.f, 520.f, 24.f);
+        ladder_sprite.setPosition(540.f, 620.f);
+        window.draw(ladder_sprite);
+    } else if (current_screen == 2) {
+        draw_platform_line(150.f, 640.f, 380.f, 24.f);
+        draw_platform_line(650.f, 550.f, 360.f, 24.f);
+        ladder_sprite.setPosition(300.f, 640.f);
+        window.draw(ladder_sprite);
+        ladder_sprite.setPosition(800.f, 550.f);
+        window.draw(ladder_sprite);
+    } else if (current_screen == 3) {
+        draw_platform_line(200.f, 600.f, 720.f, 24.f);
+        ladder_sprite.setPosition(500.f, 600.f);
+        window.draw(ladder_sprite);
+    } else if (current_screen == 4) {
+        draw_platform_line(100.f, 640.f, 350.f, 24.f);
+        draw_platform_line(600.f, 530.f, 420.f, 24.f);
+        ladder_sprite.setPosition(240.f, 640.f);
+        window.draw(ladder_sprite);
+        ladder_sprite.setPosition(780.f, 530.f);
+        window.draw(ladder_sprite);
     }
 }
 
@@ -386,7 +466,6 @@ void play_hit_sound(Sound& hit_sound) {
     hit_sound.setPlayingOffset(milliseconds(80));
 }
 
-// Hold Down arrow while on the ground to kneel; release to stand back up.
 void player_kneel(float& player_y, int& player_height, const int stand_height, const int kneel_height, bool& is_kneeling, bool on_ground) {
     bool kneel_pressed = Keyboard::isKeyPressed(Keyboard::Down);
 
@@ -404,15 +483,47 @@ void player_kneel(float& player_y, int& player_height, const int stand_height, c
     }
 }
 
-void player_movement(float& player_x, float& velocity_y, bool& on_ground, bool is_kneeling, bool& facing_right, bool& is_moving, bool& was_against_wall, Sound& hit_sound, const float walk_speed, const float jump_velocity, const int player_width) {
+void player_movement(float& player_x, float& player_y, float ground_y, const int player_height, float& velocity_y, bool& on_ground, bool is_kneeling, bool& facing_right, bool& is_moving, bool& was_against_wall, Sound& hit_sound, const float walk_speed, const float jump_velocity, const int player_width, int& current_screen, const int max_screens, bool& is_on_ladder) {
     float current_speed = is_kneeling ? walk_speed * 0.5f : walk_speed;
     float move_x = 0.0f;
 
     if (Keyboard::isKeyPressed(Keyboard::Left)) {
         move_x -= current_speed;
+        is_on_ladder = false;
     }
     if (Keyboard::isKeyPressed(Keyboard::Right)) {
         move_x += current_speed;
+        is_on_ladder = false;
+    }
+
+    float ladder_x = 0.f;
+    if (current_screen == 1) ladder_x = 540.f;
+    else if (current_screen == 2) ladder_x = 300.f;
+    else if (current_screen == 3) ladder_x = 500.f;
+    else if (current_screen == 4) ladder_x = 240.f;
+
+    float platform_top_for_ladder = 620.f;
+    if (current_screen == 1) platform_top_for_ladder = 620.f;
+    else if (current_screen == 2) platform_top_for_ladder = 550.f; // bottom/top platforms
+    else if (current_screen == 3) platform_top_for_ladder = 600.f;
+    else if (current_screen == 4) platform_top_for_ladder = 530.f;
+
+    // Only allow ladder climbing if player is at ground level or around platform Y, not trapped right under a block
+    if (player_x + player_width >= ladder_x - 15.f && player_x <= ladder_x + 50.f) {
+        if (Keyboard::isKeyPressed(Keyboard::Up)) {
+            // Check if player is near ground or platform base
+            if (player_y >= ground_y - player_height - 20.f || (player_y >= platform_top_for_ladder - 30.f && player_y <= platform_top_for_ladder + 40.f)) {
+                velocity_y = -4.0f;
+                is_on_ladder = true;
+                on_ground = false;
+            }
+        } else if (Keyboard::isKeyPressed(Keyboard::Down)) {
+            if (player_y >= ground_y - player_height - 20.f || player_y <= platform_top_for_ladder + 20.f) {
+                velocity_y = 4.0f;
+                is_on_ladder = true;
+                on_ground = false;
+            }
+        }
     }
 
     if (move_x < 0.0f) {
@@ -426,18 +537,22 @@ void player_movement(float& player_x, float& velocity_y, bool& on_ground, bool i
     }
 
     bool hit_edge = false;
-    if (move_x < 0.0f) {
-        if (player_x + move_x >= 0.0f) {
-            player_x += move_x;
+    player_x += move_x;
+
+    if (player_x < 0.0f) {
+        if (current_screen > 1) {
+            current_screen--;
+            player_x = (float)(screen_x - player_width - 10.0f);
         } else {
             player_x = 0.0f;
             hit_edge = true;
         }
-    } else if (move_x > 0.0f) {
-        if (player_x + move_x + player_width <= world_width) {
-            player_x += move_x;
+    } else if (player_x + player_width > screen_x) {
+        if (current_screen < max_screens) {
+            current_screen++;
+            player_x = 20.0f;
         } else {
-            player_x = world_width - player_width;
+            player_x = (float)(screen_x - player_width);
             hit_edge = true;
         }
     }
@@ -448,45 +563,54 @@ void player_movement(float& player_x, float& velocity_y, bool& on_ground, bool i
     was_against_wall = hit_edge;
 
     bool jump_pressed = Keyboard::isKeyPressed(Keyboard::Up);
-    if (jump_pressed && on_ground && !is_kneeling) {
+    if (jump_pressed && on_ground && !is_kneeling && !is_on_ladder) {
         velocity_y = jump_velocity;
         on_ground = false;
     }
 }
 
-void player_gravity(float& player_y, float& velocity_y, bool& on_ground, Sound& hit_sound, const float gravity, const float terminal_velocity, const int ground_y, const int player_height) {
+void player_gravity(float& player_y, float& velocity_y, bool& on_ground, Sound& hit_sound, const float gravity, const float terminal_velocity, const int ground_y, const int player_height, float player_x, int player_width, float p_x[], float p_y[], float p_w[], float p_h[], int p_count, bool& is_on_ladder) {
+    if (is_on_ladder) {
+        player_y += velocity_y;
+        return;
+    }
+
     bool was_on_ground = on_ground;
     float next_y = player_y + velocity_y;
 
-    if (velocity_y < 0.0f) {
-        if (next_y <= 0.0f) {
-            player_y = 0.0f;
-            velocity_y = 0.0f;
-            play_hit_sound(hit_sound);
-        } else {
-            player_y = next_y;
-        }
-        on_ground = false;
-    } else {
-        if (next_y + player_height >= ground_y) {
-            on_ground = true;
-            player_y = (float)(ground_y - player_height);
-            if (!was_on_ground) {
-                play_hit_sound(hit_sound);
-            }
-        } else {
-            player_y = next_y;
-            on_ground = false;
+    bool landed = false;
+    float landing_y = (float)(ground_y - player_height);
+
+    if (next_y + player_height >= ground_y) {
+        landing_y = (float)(ground_y - player_height);
+        landed = true;
+    }
+
+    for (int i = 0; i < p_count; i++) {
+        float plat_top = p_y[i];
+        float plat_left = p_x[i];
+        float plat_right = p_x[i] + p_w[i];
+        bool over_platform = (player_x + player_width > plat_left + 4.0f && player_x < plat_right - 4.0f);
+        if (over_platform && velocity_y >= 0.0f && player_y + player_height <= plat_top + 14.0f && next_y + player_height >= plat_top) {
+            landed = true;
+            landing_y = plat_top - player_height;
         }
     }
 
-    if (!on_ground) {
+    if (landed && velocity_y >= 0.0f) {
+        on_ground = true;
+        player_y = landing_y;
+        velocity_y = 0.0f;
+        if (!was_on_ground) {
+            play_hit_sound(hit_sound);
+        }
+    } else {
+        player_y = next_y;
+        on_ground = false;
         velocity_y += gravity;
         if (velocity_y > terminal_velocity) {
             velocity_y = terminal_velocity;
         }
-    } else {
-        velocity_y = 0.0f;
     }
 }
 
@@ -537,7 +661,6 @@ void update_player_sprite(Sprite& player_sprite, Texture& run_texture, Texture& 
     foot_height = 42;
 
     if (is_kneeling && on_ground) {
-        // Kneeling pose in run.png
         run_step = 0;
         anim_timer = 0;
         frame_width = 20;
@@ -554,7 +677,6 @@ void update_player_sprite(Sprite& player_sprite, Texture& run_texture, Texture& 
         frame_width = run_w[run_step];
         player_sprite.setTextureRect(IntRect(run_x[run_step], 0, frame_width, frame_height));
     } else {
-        // Standing / upright jumping pose in run.png
         run_step = 0;
         anim_timer = 0;
         frame_width = 18;
@@ -628,7 +750,6 @@ void check_whip_hits(bool whip_hitbox_active, float whip_box_x, float whip_box_y
         return;
     }
 
-    // Spiked crawlers spawn refill pickups
     for (int i = 0; i < max_crawlers; i++) {
         if (!crawler_alive[i]) continue;
         if (whip_box_x < crawler_x[i] + crawler_width &&
@@ -642,7 +763,6 @@ void check_whip_hits(bool whip_hitbox_active, float whip_box_x, float whip_box_y
         }
     }
 
-    // Blue jumping enemies spawn coins
     for (int i = 0; i < max_blue_enemies; i++) {
         if (!blue_alive[i]) continue;
         if (whip_box_x < blue_x[i] + blue_width &&
@@ -656,7 +776,6 @@ void check_whip_hits(bool whip_hitbox_active, float whip_box_x, float whip_box_y
         }
     }
 
-    // Flying insects spawn coins
     for (int i = 0; i < max_insects; i++) {
         if (!insect_alive[i]) continue;
         if (whip_box_x < insect_x[i] + insect_width &&
@@ -688,26 +807,11 @@ void spawn_next_crawler(int& spawned_count, int& spawn_timer, float crawler_x[],
     }
 
     int i = spawned_count;
-    int max_spawn_x = (int)world_width - crawler_width;
+    int max_spawn_x = screen_x - crawler_width;
     if (max_spawn_x < 1) max_spawn_x = 1;
 
-    float random_x = (float)(rand() % max_spawn_x);
-    for (int attempt = 0; attempt < 10; attempt++) {
-        bool too_close = false;
-        for (int j = 0; j < i; j++) {
-            if (crawler_alive[j] && fabs(random_x - crawler_x[j]) < crawler_width * 1.5f) {
-                too_close = true;
-                break;
-            }
-        }
-        if (!too_close) {
-            break;
-        }
-        random_x = (float)(rand() % max_spawn_x);
-    }
-
     crawler_alive[i] = true;
-    crawler_x[i] = random_x;
+    crawler_x[i] = (float)(rand() % max_spawn_x);
     crawler_y[i] = (float)(-crawler_height);
     crawler_vy[i] = 0.0f;
     crawler_on_ground[i] = false;
@@ -750,8 +854,8 @@ void update_crawlers(float crawler_x[], float crawler_y[], float crawler_vx[], f
                 crawler_x[i] = 0.0f;
                 crawler_vx[i] = -crawler_vx[i];
                 crawler_facing_right[i] = true;
-            } else if (crawler_x[i] + crawler_width >= world_width) {
-                crawler_x[i] = world_width - crawler_width;
+            } else if (crawler_x[i] + crawler_width >= screen_x) {
+                crawler_x[i] = (float)(screen_x - crawler_width);
                 crawler_vx[i] = -crawler_vx[i];
                 crawler_facing_right[i] = false;
             }
@@ -793,26 +897,11 @@ void spawn_next_blue_enemy(int& spawned_count, int& spawn_timer, float player_x,
     }
 
     int i = spawned_count;
-    int max_spawn_x = (int)world_width - blue_width;
+    int max_spawn_x = screen_x - blue_width;
     if (max_spawn_x < 1) max_spawn_x = 1;
 
-    float random_x = (float)(rand() % max_spawn_x);
-    for (int attempt = 0; attempt < 15; attempt++) {
-        bool too_close = false;
-        for (int j = 0; j < i; j++) {
-            if (blue_alive[j] && fabs(random_x - blue_x[j]) < blue_width * 2.5f) {
-                too_close = true;
-                break;
-            }
-        }
-        if (!too_close) {
-            break;
-        }
-        random_x = (float)(rand() % max_spawn_x);
-    }
-
     blue_alive[i] = true;
-    blue_x[i] = random_x;
+    blue_x[i] = (float)(rand() % max_spawn_x);
     blue_y[i] = (float)(-blue_height);
     blue_vx[i] = 0.0f;
     blue_vy[i] = 0.0f;
@@ -846,8 +935,8 @@ void update_blue_enemies(float player_x, float blue_x[], float blue_y[], float b
 
             if (blue_x[i] < 0.0f) {
                 blue_x[i] = 0.0f;
-            } else if (blue_x[i] + blue_width > world_width) {
-                blue_x[i] = world_width - blue_width;
+            } else if (blue_x[i] + blue_width > screen_x) {
+                blue_x[i] = (float)(screen_x - blue_width);
             }
 
             blue_y[i] += blue_vy[i];
@@ -909,24 +998,9 @@ void spawn_next_flying_insect(int& spawned_count, int& spawn_timer, float insect
     int max_fly_y = ground_y - insect_height - 90;
     if (max_fly_y <= min_fly_y) max_fly_y = min_fly_y + 1;
 
-    float random_base_y = (float)(min_fly_y + rand() % (max_fly_y - min_fly_y));
-    for (int attempt = 0; attempt < 20; attempt++) {
-        bool too_close = false;
-        for (int j = 0; j < i; j++) {
-            if (insect_alive[j] && fabs(random_base_y - insect_base_y[j]) < insect_height * 1.2f) {
-                too_close = true;
-                break;
-            }
-        }
-        if (!too_close) {
-            break;
-        }
-        random_base_y = (float)(min_fly_y + rand() % (max_fly_y - min_fly_y));
-    }
-
     insect_alive[i] = true;
-    insect_x[i] = world_width - insect_width;
-    insect_base_y[i] = random_base_y;
+    insect_x[i] = (float)(screen_x - insect_width);
+    insect_base_y[i] = (float)(min_fly_y + rand() % (max_fly_y - min_fly_y));
     insect_wave_angle[i] = (float)(rand() % 628) / 100.0f;
     insect_y[i] = insect_base_y[i] + sin(insect_wave_angle[i]) * 45.0f;
     insect_vx[i] = -3.2f;
@@ -950,8 +1024,8 @@ void update_flying_insects(float insect_x[], float insect_y[], float insect_base
             insect_x[i] = 0.0f;
             insect_vx[i] = -insect_vx[i];
             insect_facing_right[i] = true;
-        } else if (insect_x[i] + insect_width >= world_width) {
-            insect_x[i] = world_width - insect_width;
+        } else if (insect_x[i] + insect_width >= screen_x) {
+            insect_x[i] = (float)(screen_x - insect_width);
             insect_vx[i] = -insect_vx[i];
             insect_facing_right[i] = false;
         }
@@ -1010,10 +1084,10 @@ void spawn_coin(float coin_x[], float coin_y[], float coin_vy[], int coin_frame[
     coin_active[slot] = true;
     coin_x[slot] = spawn_x;
     coin_y[slot] = spawn_y;
-    coin_vy[slot] = -12.0f;     // Pops up into the air before falling down onto the floor
+    coin_vy[slot] = -12.0f;
     coin_frame[slot] = 0;
     coin_anim_timer[slot] = 0;
-    coin_pickup_delay[slot] = 20;  // Prevents instant pickup on the kill frame when enemy is close to Quinn
+    coin_pickup_delay[slot] = 20;
 }
 
 void update_coins(float coin_x[], float coin_y[], float coin_vy[], int coin_frame[], int coin_anim_timer[], int coin_pickup_delay[], bool coin_active[], const int max_coins, const float coin_gravity, const int ground_y, const float coin_radius, float player_x, float player_y, int player_width, int player_height, int& score, Sound& coin_sound) {
@@ -1029,14 +1103,12 @@ void update_coins(float coin_x[], float coin_y[], float coin_vy[], int coin_fram
             coin_pickup_delay[i]--;
         }
 
-        // Continuously rotate coin around its axis
         coin_anim_timer[i]++;
         if (coin_anim_timer[i] >= coin_anim_delay) {
             coin_anim_timer[i] = 0;
             coin_frame[i] = (coin_frame[i] + 1) % total_coin_frames;
         }
 
-        // Rise up first, then fall under gravity until landing on the floor
         if (coin_y[i] + coin_radius < ground_y || coin_vy[i] < 0.0f) {
             coin_y[i] += coin_vy[i];
             coin_vy[i] += coin_gravity;
@@ -1046,7 +1118,6 @@ void update_coins(float coin_x[], float coin_y[], float coin_vy[], int coin_fram
             }
         }
 
-        // Collected when overlapping the player's hitbox (after brief spawn pop delay)
         if (coin_pickup_delay[i] <= 0) {
             float coin_left = coin_x[i] - coin_radius;
             float coin_top = coin_y[i] - coin_radius;
@@ -1144,9 +1215,9 @@ void update_refills(float refill_x[], float refill_y[], float refill_vy[], int r
     }
 }
 
-void display_refills(RenderWindow& window, Sprite& refill_sprite, Texture& refill_texture, float refill_x[], float refill_y[], bool refill_active[], const int max_refills, const int refill_w, const int refill_h, const float refill_scale_x, const float refill_scale_y) {
+void display_refills(RenderWindow& window, Sprite& refill_sprite, Texture& refill_texture, float refill_x[], float refill_y[], bool refill_active[], const int max_refills, const int refill_w, const int refill_h, const float refill_scale_x, const float refill_scale_y, const int raw_refill_w) {
     refill_sprite.setTexture(refill_texture, true);
-    refill_sprite.setOrigin(refill_w * 0.5f, refill_h * 0.5f);
+    refill_sprite.setOrigin((float)raw_refill_w * 0.5f, (float)refill_h * 0.5f);
     refill_sprite.setScale(refill_scale_x, refill_scale_y);
 
     for (int i = 0; i < max_refills; i++) {
